@@ -5,6 +5,7 @@ import { authRoutes } from './routes/auth.js';
 import { authEnhancedRoutes } from './routes/auth-enhanced.js';
 import { dataRoutes } from './routes/data.js';
 import { adminRoutes } from './routes/admin.js';
+import { apiKeyRoutes } from './routes/api-keys.js';
 import { db } from './db.js';
 
 const app = new Hono();
@@ -21,6 +22,7 @@ app.route('/auth', authRoutes);
 app.route('/auth', authEnhancedRoutes);
 app.route('/api', dataRoutes);
 app.route('/admin', adminRoutes);
+app.route('/api-keys', apiKeyRoutes);
 
 // 错误处理
 app.onError((err, c) => {

@@ -66,3 +66,9 @@ export const resetPasswordSchema = z.object({
   token: z.string(),
   newPassword: z.string().min(6),
 });
+
+// API Key Schema
+export const createApiKeySchema = z.object({
+  name: z.string().min(1),
+  projectId: z.string().optional(),
+});
