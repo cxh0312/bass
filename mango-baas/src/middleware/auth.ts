@@ -25,6 +25,16 @@ export async function authMiddleware(c: Context, next: Next) {
   const token = authHeader.slice(7);
   try {
     const payload = await verify(token, process.env.JWT_SECRET || 'secret');
+
+    // 检查 JWT 黑名单
+    const tokenId = payload.jti as string || payload.userId as string;
+    const blacklisted = await db.refreshToken.findUnique({
+      where: { tokenId }
+    });
+    if (blacklisted) {
+      return c.json({ code: 401, msg: 'Token revoked' }, 401);
+    }
+
     c.set('user', payload);
     c.set('authType', 'jwt');
   } catch {

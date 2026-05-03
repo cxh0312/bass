@@ -47,3 +47,22 @@ export const responseSchema = z.object({
   page: z.number().optional(),
   limit: z.number().optional(),
 });
+
+// 邮箱验证 Schema
+export const sendVerificationSchema = z.object({
+  email: z.string().email(),
+});
+
+export const verifyEmailSchema = z.object({
+  token: z.string(),
+});
+
+// 密码重置 Schema
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string(),
+  newPassword: z.string().min(6),
+});

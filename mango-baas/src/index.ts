@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { authRoutes } from './routes/auth.js';
+import { authEnhancedRoutes } from './routes/auth-enhanced.js';
 import { dataRoutes } from './routes/data.js';
 import { adminRoutes } from './routes/admin.js';
 import { db } from './db.js';
@@ -17,6 +18,7 @@ app.get('/api/health', (c) => c.json({ code: 0, msg: 'ok' }));
 
 // 路由
 app.route('/auth', authRoutes);
+app.route('/auth', authEnhancedRoutes);
 app.route('/api', dataRoutes);
 app.route('/admin', adminRoutes);
 

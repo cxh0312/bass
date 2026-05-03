@@ -13,6 +13,8 @@ model User {
   password  String
   name      String?
   role      Role     @default(viewer)
+  emailVerified Boolean @default(false)
+  verificationToken String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   projects  ProjectMember[]
@@ -69,4 +71,87 @@ enum Role {
   admin
   editor
   viewer
+}
+
+// JWT 黑名单
+model RefreshToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tokenId   String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// 无状态密码重置 Token（备用，简单起见用 JWT 实现）
+model PasswordResetToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// API Key
+model ApiKey {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  key       String   @unique
+  keyPrefix String
+  userId    String
+  projectId String?
+  lastUsed  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Webhook
+model Webhook {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  projectId String
+  name      String
+  url       String
+  events    String[]
+  secret    String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Webhook 投递记录
+model WebhookDelivery {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  webhookId   String
+  event       String
+  payload     Json
+  response    String?
+  statusCode  Int?
+  success     Boolean  @default(false)
+  attempt     Int      @default(1)
+  nextRetryAt DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// 审计日志
+model AuditLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String
+  action     String
+  resource   String
+  resourceId String?
+  details    Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+}
+
+// 限流记录
+model RateLimitRecord {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  windowStart DateTime
+  count      Int      @default(1)
+  createdAt  DateTime @default(now())
+
+  @@unique([identifier, windowStart])
 }
