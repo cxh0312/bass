@@ -4,11 +4,13 @@ import { db } from '../db.js';
 import { querySchema, createDataSchema, updateDataSchema, buildDynamicSchema } from '../schemas.js';
 import { authMiddleware, verifyAuth } from '../middleware/auth.js';
 import { projectAccessMiddleware, checkPermission } from '../middleware/rbac.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 
 export const dataRoutes = new Hono();
 
 // 应用认证和项目访问中间件
 dataRoutes.use('/*', authMiddleware);
+dataRoutes.use('/*', rateLimitMiddleware);
 dataRoutes.use('/*', projectAccessMiddleware);
 
 // 通用响应
