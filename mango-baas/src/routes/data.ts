@@ -32,47 +32,76 @@ function parseFilter(filterStr?: string): Record<string, unknown> {
 }
 
 // GET /api/:projectId/:collection - 查询列表
-dataRoutes.get('/:projectId/:collection', zValidator('query', querySchema), async (c) => {
+dataRoutes.get('/:projectId/:collection', async (c) => {
   const { projectId, collection } = c.req.param();
-  const { page, limit, filter: filterStr, sort, fields } = c.req.valid('query');
+  const { page, limit, sort, filter, search } = c.req.query();
   const member = c.get('member');
 
-  // 获取 Collection
-  const collectionDoc = await db.collection.findFirst({
-    where: { projectId, name: collection },
+  const collectionRecord = await db.collection.findFirst({
+    where: { projectId, name: collection }
   });
 
-  if (!collectionDoc) {
-    return error(c, 404, 'Collection not found', 404);
+  if (!collectionRecord) {
+    return c.json({ code: 404, msg: 'Collection not found' }, 404);
   }
 
   // 检查读权限
-  if (!checkPermission(member, collectionDoc, 'read')) {
-    return error(c, 403, 'Permission denied', 403);
+  if (!checkPermission(member, collectionRecord, 'read')) {
+    return c.json({ code: 403, msg: 'Permission denied' }, 403);
   }
 
+  const pageNum = parseInt(page || '1');
+  const limitNum = Math.min(parseInt(limit || '20'), 100);
+  const skip = (pageNum - 1) * limitNum;
+
   // 构建查询
-  const where: Record<string, unknown> = {
-    collectionId: collectionDoc.id,
-    projectId,
-    ...parseFilter(filterStr),
-  };
+  const where: any = { projectId, collectionId: collectionRecord.id };
+
+  // 过滤
+  if (filter) {
+    try {
+      const filterObj = JSON.parse(filter);
+      Object.keys(filterObj).forEach(key => {
+        if (typeof filterObj[key] === 'object') {
+          where[`payload.${key}`] = filterObj[key];
+        } else {
+          where[`payload.${key}`] = filterObj[key];
+        }
+      });
+    } catch {}
+  }
+
+  // 搜索
+  if (search) {
+    where.OR = [
+      { 'payload.name': { contains: search, mode: 'insensitive' } },
+      { 'payload.title': { contains: search, mode: 'insensitive' } },
+      { 'payload.description': { contains: search, mode: 'insensitive' } }
+    ];
+  }
+
+  // 排序
+  let orderBy: any = { createdAt: 'desc' };
+  if (sort) {
+    const [field, dir] = sort.startsWith('-') ? [sort.slice(1), 'desc'] : [sort, 'asc'];
+    orderBy = { [`payload.${field}`]: dir };
+  }
 
   const [data, total] = await Promise.all([
     db.data.findMany({
       where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: sort
-        ? sort.startsWith('-')
-          ? { [sort.slice(1)]: 'desc' as const }
-          : { [sort]: 'asc' as const }
-        : { createdAt: 'desc' as const },
+      orderBy,
+      skip,
+      take: limitNum
     }),
-    db.data.count({ where }),
+    db.data.count({ where })
   ]);
 
-  return success(c, data, { total, page, limit });
+  return c.json({
+    success: true,
+    data,
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+  });
 });
 
 // POST /api/:projectId/:collection - 创建数据
