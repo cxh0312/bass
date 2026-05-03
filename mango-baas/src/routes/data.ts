@@ -5,6 +5,7 @@ import { querySchema, createDataSchema, updateDataSchema, buildDynamicSchema } f
 import { authMiddleware, verifyAuth } from '../middleware/auth.js';
 import { projectAccessMiddleware, checkPermission } from '../middleware/rbac.js';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+import { triggerWebhooks } from '../services/webhook.js';
 
 export const dataRoutes = new Hono();
 
@@ -118,6 +119,8 @@ dataRoutes.post('/:projectId/:collection', async (c) => {
     },
   });
 
+  await triggerWebhooks(projectId, 'create', { collectionId: collectionDoc.id, recordId: data.id, payload: body });
+
   return success(c, { id: data.id, ...body }, { total: 1, page: 1, limit: 1 });
 });
 
@@ -184,6 +187,8 @@ dataRoutes.put('/:projectId/:collection/:id', async (c) => {
     data: { payload: body },
   });
 
+  await triggerWebhooks(projectId, 'update', { collectionId: collectionDoc.id, recordId: id, payload: body });
+
   return success(c, { id: data.id, ...body });
 });
 
@@ -213,6 +218,8 @@ dataRoutes.delete('/:projectId/:collection/:id', async (c) => {
   }
 
   await db.data.delete({ where: { id } });
+
+  await triggerWebhooks(projectId, 'delete', { collectionId: collectionDoc.id, recordId: id, payload: {} });
 
   return success(c, { id });
 });
