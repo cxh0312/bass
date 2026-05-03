@@ -1,7 +1,10 @@
 自建 BaaS 平台整体设计方案
 项目代号：Mango BaaS（芒果后端即服务）
-版本：v1.0
+版本：v1.1
 日期：2025年5月
+更新日志：
+- v1.1: 新增认证增强、API Key、Webhook、限流、审计日志、查询增强
+- v1.0: 初始版本
 
 一、项目定位
 构建一个轻量级、可自托管、团队友好的后端即服务平台，为内部项目提供统一的用户认证、数据存储和业务API能力，同时为运营/策划同学提供可视化管理工具。
@@ -62,24 +65,33 @@ Web 框架	Hono	4.x	超轻量、高性能、支持多运行时
 反向代理(可选)	Nginx / Caddy	-	HTTPS、负载均衡
 四、模块设计
 4.1 核心模块清单
-模块	说明	优先级
-用户系统	注册、登录、JWT 签发与验证	P0（已完成设计）
-数据 CRUD API	通用集合的增删改查，按用户隔离	P0（已完成设计）
-输入校验	Zod Schema 统一校验所有入参	P0（已完成设计）
-权限系统(RBAC)	角色管理、接口权限控制	P1
-文件存储	头像、图片、附件上传	P1
-API Key 管理	为第三方服务提供 API Key 认证	P1
-数据看板	在 Budibase 中展示统计指标	P2
-实时通知	WebSocket 推送数据变更	P2
-操作审计	记录关键操作日志	P2
+模块	说明	优先级	状态
+用户系统	注册、登录、JWT 签发与验证	P0	✅ 已实现
+数据 CRUD API	通用集合的增删改查，按用户隔离	P0	✅ 已实现
+输入校验	Zod Schema 统一校验所有入参	P0	✅ 已实现
+邮箱验证	注册后邮箱验证链接	 P1	✅ 已实现
+密码重置	无状态 JWT Token 密码重置	 P1	✅ 已实现
+JWT 注销	Token 黑名单机制	 P1	✅ 已实现
+API Key 管理	用户级 API Key 认证	P1	✅ 已实现
+限流	滑动窗口限流（IP/User 双维度）	P1	✅ 已实现
+操作审计	管理员操作审计日志	P1	✅ 已实现
+Webhook	数据变更事件触发（签名+重试）	P1	✅ 已实现
+查询增强	分页/排序/过滤/搜索	P1	✅ 已实现
+权限系统(RBAC)	角色管理、接口权限控制	P1	🔲 待开发
+文件存储	头像、图片、附件上传	P1	🔲 待开发
+数据看板	在 Budibase 中展示统计指标	P2	🔲 待开发
+实时通知	WebSocket 推送数据变更	P2	🔲 待开发
 4.2 数据模型
-text
+
+```
 User {
   id: ObjectId
   email: string (unique)
   password: string (hashed)
   name: string?
   role: "admin" | "editor" | "viewer"
+  emailVerified: boolean (default: false)
+  verificationToken: string?
   createdAt: DateTime
   updatedAt: DateTime
 }
@@ -89,7 +101,7 @@ Project {
   name: string
   description: string?
   ownerId: ObjectId (→ User)
-  apiKey: string
+  apiKey: string (unique)
   createdAt: DateTime
 }
 
@@ -101,47 +113,155 @@ Collection {
   permissions: JSON (权限规则)
   createdAt: DateTime
 }
+
+// --- v1.1 新增模型 ---
+
+RefreshToken {           # JWT 黑名单
+  id: ObjectId
+  tokenId: string (unique)
+  userId: string
+  expiresAt: DateTime
+  createdAt: DateTime
+}
+
+PasswordResetToken {    # 密码重置 Token
+  id: ObjectId
+  userId: string
+  token: string (unique)
+  expiresAt: DateTime
+  used: boolean (default: false)
+  createdAt: DateTime
+}
+
+ApiKey {                # 用户级 API Key
+  id: ObjectId
+  name: string
+  key: string (hashed, unique)
+  keyPrefix: string
+  userId: string
+  projectId: string?
+  lastUsed: DateTime?
+  createdAt: DateTime
+}
+
+Webhook {               # Webhook 配置
+  id: ObjectId
+  projectId: string
+  name: string
+  url: string
+  events: string[]     # ["create", "update", "delete"]
+  secret: string (unique)  # HMAC 签名密钥
+  active: boolean (default: true)
+  createdAt: DateTime
+}
+
+WebhookDelivery {       # Webhook 投递记录
+  id: ObjectId
+  webhookId: string
+  event: string
+  payload: JSON
+  response: string?
+  statusCode: int?
+  success: boolean (default: false)
+  attempt: int (default: 1)
+  nextRetryAt: DateTime?
+  createdAt: DateTime
+}
+
+AuditLog {              # 审计日志
+  id: ObjectId
+  userId: string
+  action: string       # "auth.login", "user.role_change", etc.
+  resource: string
+  resourceId: string?
+  details: JSON?
+  ip: string?
+  userAgent: string?
+  createdAt: DateTime
+}
+
+RateLimitRecord {       # 限流记录
+  id: ObjectId
+  identifier: string    # IP 或 User ID
+  windowStart: DateTime
+  count: int (default: 1)
+  createdAt: DateTime
+}
+```
+
 五、API 设计
 5.1 认证接口
-方法	路径	说明	认证
-POST	/auth/register	注册新用户	无
-POST	/auth/login	登录获取 JWT	无
-POST	/auth/refresh	刷新令牌	JWT
-GET	/auth/me	获取当前用户信息	JWT
+方法	路径	说明	认证	状态
+POST	/auth/register	注册新用户	无	✅
+POST	/auth/login	登录获取 JWT	无	✅
+GET	/auth/me	获取当前用户信息	JWT	✅
+POST	/auth/send-verification	发送邮箱验证链接	无	✅
+POST	/auth/verify-email	验证邮箱	无	✅
+POST	/auth/forgot-password	请求密码重置	无	✅
+POST	/auth/reset-password	重置密码	无	✅
+POST	/auth/logout	注销 JWT	JWT	✅
+
 5.2 数据操作接口
-方法	路径	说明	认证
-GET	/api/:projectId/:collection	查询数据列表	JWT
-POST	/api/:projectId/:collection	创建数据	JWT
-GET	/api/:projectId/:collection/:id	获取单条数据	JWT
-PUT	/api/:projectId/:collection/:id	更新数据	JWT
-DELETE	/api/:projectId/:collection/:id	删除数据	JWT
-5.3 管理接口
-方法	路径	说明	认证 + 角色
-GET	/admin/users	用户列表	admin
-PUT	/admin/users/:id/role	修改用户角色	admin
-GET	/admin/stats	系统统计	admin
+方法	路径	说明	认证	状态
+GET	/api/:projectId/:collection	查询数据列表（支持分页/排序/过滤/搜索）	JWT	✅
+POST	/api/:projectId/:collection	创建数据	JWT	✅
+GET	/api/:projectId/:collection/:id	获取单条数据	JWT	✅
+PUT	/api/:projectId/:collection/:id	更新数据	JWT	✅
+DELETE	/api/:projectId/:collection/:id	删除数据	JWT	✅
+
+5.3 API Key 管理接口
+方法	路径	说明	认证	状态
+GET	/api-keys	列出我的 API Key	JWT	✅
+POST	/api-keys	创建 API Key	JWT	✅
+DELETE	/api-keys/:id	删除 API Key	JWT	✅
+
+5.4 Webhook 管理接口
+方法	路径	说明	认证	状态
+GET	/webhooks	列出 Webhook	JWT	✅
+POST	/webhooks	创建 Webhook	JWT	✅
+PUT	/webhooks/:id	更新 Webhook	JWT	✅
+DELETE	/webhooks/:id	删除 Webhook	JWT	✅
+POST	/webhooks/:id/test	测试 Webhook	JWT	✅
+
+5.5 管理接口
+方法	路径	说明	认证 + 角色	状态
+GET	/admin/users	用户列表	admin	✅
+PUT	/admin/users/:id/role	修改用户角色	admin	✅
+GET	/admin/stats	系统统计	admin	✅
+GET	/admin/audit-logs	审计日志列表	admin	✅
 六、项目目录结构
-text
+
+```
 mango-baas/
 ├── src/
 │   ├── index.ts              # 主入口，Hono 应用组装
 │   ├── db.ts                 # Prisma Client 单例
-│   ├── auth.ts               # 注册、登录、JWT 工具函数
+│   ├── auth.ts               # JWT 工具函数
 │   ├── schemas.ts            # Zod 校验 Schema 集中定义
 │   ├── routes/
-│   │   ├── auth.ts           # 认证路由
-│   │   ├── data.ts           # 数据 CRUD 路由
-│   │   └── admin.ts          # 管理路由
-│   └── middleware/
-│       ├── auth.ts           # JWT 鉴权中间件
-│       └── rbac.ts           # 角色权限中间件
+│   │   ├── auth.ts           # 基础认证路由
+│   │   ├── auth-enhanced.ts  # 认证增强（邮箱验证/密码重置/注销）
+│   │   ├── data.ts           # 数据 CRUD 路由（限流）
+│   │   ├── admin.ts          # 管理路由
+│   │   ├── api-keys.ts       # API Key 管理
+│   │   └── webhooks.ts       # Webhook 管理
+│   ├── middleware/
+│   │   ├── auth.ts           # JWT/API Key 鉴权中间件
+│   │   ├── rbac.ts           # 角色权限中间件
+│   │   └── rate-limit.ts     # 限流中间件
+│   ├── services/
+│   │   ├── audit.ts          # 审计日志服务
+│   │   ├── rate-limit.ts     # 限流服务
+│   │   └── webhook.ts        # Webhook 服务
+│   └── jobs/
+│       └── cleanup.ts        # 清理任务（过期 token/限流记录）
 ├── prisma/
 │   └── schema.prisma         # 数据模型定义
-├── tests/                    # 测试用例
 ├── .env                      # 环境变量
 ├── package.json
 ├── tsconfig.json
 └── README.md
+```
 七、部署方案
 方案 A：Docker 单机部署（推荐起步）
 text
@@ -181,9 +301,11 @@ docker run -d -p 10000:80 \
 八、安全设计
 层面	措施
 传输安全	HTTPS 全链路
-认证安全	JWT 7天过期、密码 bcrypt 10轮哈希
+认证安全	JWT 7天过期、密码 bcrypt 10轮哈希、JWT 黑名单机制
 输入安全	Zod 严格校验，防止 NoSQL 注入
-权限安全	用户数据隔离、角色控制
+限流安全	滑动窗口限流（IP 100req/min，用户 1000req/min）
+Webhook 安全	HMAC-SHA256 签名验证
+权限安全	用户数据隔离、角色控制、项目级/用户级 API Key
 运维安全	环境变量管理密钥、定期备份 MongoDB
 九、可替换性设计
 如果未来某个组件需要升级或替换：
@@ -195,7 +317,8 @@ MongoDB → PostgreSQL	更换数据库	Prisma 切换数据源
 Budibase → Appsmith	更换管理面板	无后端改动
 JWT → OAuth2	更换认证方案	仅 auth 模块
 十、推荐实施路线图
-text
+
+```
 第 1 周：搭建核心
 ├── ✅ 初始化 Hono + Prisma + Zod 项目
 ├── ✅ 实现注册/登录/JWT
@@ -203,9 +326,12 @@ text
 └── ✅ 部署 Budibase 连接 MongoDB
 
 第 2 周：完善功能
-├── 用户角色与权限
-├── 文件上传模块
-└── 通用集合 API
+├── ✅ 邮箱验证与密码重置
+├── ✅ API Key 管理
+├── ✅ 限流机制
+├── ✅ Webhook 事件触发
+├── ✅ 审计日志
+└── ✅ 查询增强（分页/排序/过滤/搜索）
 
 第 3 周：生产化
 ├── 单元测试
@@ -217,6 +343,14 @@ text
 ├── Budibase 搭建运营后台
 ├── API 文档编写
 └── 团队培训
+```
+
+待开发功能：
+- 权限系统(RBAC) - 细粒度角色权限控制
+- 文件存储 - 头像/图片/附件上传
+- 数据看板 - Budibase 统计指标
+- 实时通知 - WebSocket 推送
+
 这是完整的设计和技术方案.
 
 
