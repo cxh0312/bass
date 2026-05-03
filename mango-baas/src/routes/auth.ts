@@ -3,6 +3,7 @@ import { sign, verify } from 'hono/jwt';
 import bcrypt from 'bcryptjs';
 import { db } from '../db.js';
 import { registerSchema, loginSchema } from '../schemas.js';
+import { createAuditLog } from '../services/audit.js';
 
 export const authRoutes = new Hono();
 
@@ -53,6 +54,17 @@ authRoutes.post('/login', async (c) => {
 
   const payload = { userId: user.id, role: user.role };
   const token = await sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+
+  // 审计日志
+  const ip = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown';
+  const userAgent = c.req.header('user-agent') || 'unknown';
+  await createAuditLog({
+    userId: user.id,
+    action: 'auth.login',
+    resource: 'User',
+    ip,
+    userAgent
+  });
 
   return c.json({ code: 0, msg: 'success', data: { token, user: { id: user.id, email: user.email, role: user.role } } });
 });

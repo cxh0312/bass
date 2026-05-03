@@ -73,3 +73,36 @@ adminRoutes.get('/stats', async (c) => {
     data: { userCount, projectCount, dataCount },
   });
 });
+
+// 审计日志列表 API
+adminRoutes.get('/audit-logs', async (c) => {
+  const forbidden = await adminOnly(c);
+  if (forbidden) return forbidden;
+
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+  const userId = c.req.query('userId');
+  const action = c.req.query('action');
+  const resource = c.req.query('resource');
+
+  const where: any = {};
+  if (userId) where.userId = userId;
+  if (action) where.action = action;
+  if (resource) where.resource = resource;
+
+  const [logs, total] = await Promise.all([
+    db.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit
+    }),
+    db.auditLog.count({ where })
+  ]);
+
+  return c.json({
+    success: true,
+    data: logs,
+    pagination: { page, limit, total }
+  });
+});
