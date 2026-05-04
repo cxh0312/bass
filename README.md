@@ -49,7 +49,8 @@ cd admin-ui && bun install && bun run dev
 ├── sdk/                   # @mango-baas/sdk 客户端 SDK
 ├── prisma/                # 数据模型定义
 ├── tests/                 # Vitest 测试
-└── openspec/              # 需求与设计文档
+├── docs/                  # 设计文档、PRD
+└── openspec/              # 需求提案与任务分解
 ```
 
 ## Admin Dashboard
