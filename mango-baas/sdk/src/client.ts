@@ -36,4 +36,20 @@ export class MangoClient {
   get leaderboard(): LeaderboardAPI {
     return new LeaderboardAPI(this.config)
   }
+
+  subscribe(eventHandler: (event: string, data: any) => void): () => void {
+    const baseUrl = this.config.baseUrl ?? 'http://localhost:3000'
+    const url = `${baseUrl}/realtime/events/${this.config.projectId}?apiKey=${encodeURIComponent(this.config.apiKey)}`
+    const eventSource = new EventSource(url)
+
+    const handler = (e: MessageEvent) => {
+      try {
+        const msg = JSON.parse(e.data)
+        eventHandler(msg.event, msg.data)
+      } catch {}
+    }
+    eventSource.onmessage = handler
+
+    return () => eventSource.close()
+  }
 }
