@@ -18,6 +18,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   projects  ProjectMember[]
+
+  @@map("users")
 }
 
 model Project {
@@ -154,4 +156,91 @@ model RateLimitRecord {
   createdAt  DateTime @default(now())
 
   @@unique([identifier, windowStart])
+}
+
+// 速率限制规则
+model RateLimitRule {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  name       String
+  identifier String   // 'global' | 'project' | 'apikey' | 'user'
+  key        String?  // 当 identifier 为特定类型时的 key
+  limit      Int      // 限制次数
+  windowSec  Int      // 时间窗口（秒）
+  projectId  String?  // 项目ID（可选，用于项目级限制）
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Leaderboard 排行榜
+model Leaderboard {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  projectId      String
+  name           String
+  description    String?
+  metric         String   @default("higher")  // 'higher' | 'lower'
+  updateStrategy String   @default("realtime") // 'realtime' | 'scheduled'
+  resetSchedule  String?   // cron 表达式
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  entries        LeaderboardEntry[]
+}
+
+// API 调用指标
+model ApiMetrics {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  projectId  String
+  endpoint   String
+  method     String
+  statusCode Int
+  durationMs Int
+  timestamp  DateTime @default(now())
+
+  @@index([projectId, timestamp])
+}
+
+// 告警规则
+model AlertRule {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  metric        String   // 'error_rate' | 'response_time' | 'quota'
+  threshold     Float
+  condition     String   @default("gt")
+  windowMin     Int      @default(5)
+  notifyWebhook String?
+  notifyEmail   String?
+  enabled       Boolean  @default(true)
+  projectId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 告警事件
+model AlertEvent {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  ruleId       String
+  ruleName     String
+  metric       String
+  threshold    Float
+  actualValue  Float
+  message      String
+  acknowledged Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
+
+// LeaderboardEntry 排行榜条目
+model LeaderboardEntry {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  leaderboardId   String
+  oderId         String   // 业务方用户 ID
+  score          Float
+  metadata       Json?
+  rank           Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  leaderboard    Leaderboard @relation(fields: [leaderboardId], references: [id])
+
+  @@unique([leaderboardId, oderId])
+  @@index([leaderboardId, score])
 }

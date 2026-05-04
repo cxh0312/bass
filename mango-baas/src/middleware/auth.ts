@@ -1,5 +1,5 @@
 import { Context, Next } from 'hono';
-import { verify } from 'hono/jwt';
+import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { db } from '../db.js';
 
@@ -42,7 +42,7 @@ export async function authMiddleware(c: Context, next: Next) {
 
   const token = authHeader.slice(7);
   try {
-    const payload = await verify(token, process.env.JWT_SECRET || 'secret');
+    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret', { algorithms: ['HS256'] }) as any;
 
     // 检查 JWT 黑名单
     const tokenId = payload.jti as string || payload.userId as string;
@@ -68,4 +68,29 @@ export function verifyAuth(c: Context) {
     return { type: 'apiKey', project: c.get('project') };
   }
   return { type: 'jwt', user: c.get('user') };
+}
+
+export async function adminAuthMiddleware(c: Context, next: Next) {
+  const authHeader = c.req.header('Authorization');
+  console.log('[adminAuth] Authorization header:', authHeader?.slice(0, 50));
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json({ code: 401, msg: 'Unauthorized' }, 401);
+  }
+
+  const token = authHeader.slice(7);
+  console.log('[adminAuth] Token:', token.slice(0, 50));
+  console.log('[adminAuth] Secret:', process.env.JWT_SECRET?.slice(0, 10) + '...');
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret', { algorithms: ['HS256'] }) as any;
+    console.log('[adminAuth] Verified payload:', JSON.stringify(payload));
+    if (payload.role !== 'admin') {
+      return c.json({ code: 403, msg: 'Admin only' }, 403);
+    }
+    c.set('user', payload);
+    return next();
+  } catch (err) {
+    console.log('[adminAuth] Verify error:', err.message);
+    return c.json({ code: 401, msg: 'Invalid token' }, 401);
+  }
 }

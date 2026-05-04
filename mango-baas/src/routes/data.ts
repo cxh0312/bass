@@ -252,3 +252,139 @@ dataRoutes.delete('/:projectId/:collection/:id', async (c) => {
 
   return success(c, { id });
 });
+
+// ============ Leaderboard Client APIs ============
+
+// POST /api/leaderboards/:id/submit - 提交分数
+dataRoutes.post('/leaderboards/:id/submit', async (c) => {
+  const { id } = c.req.param();
+  const { oderId, score, metadata } = await c.req.json();
+
+  if (!oderId || score === undefined) {
+    return error(c, 400, 'oderId and score required');
+  }
+
+  const leaderboard = await db.leaderboard.findUnique({ where: { id } });
+  if (!leaderboard) {
+    return error(c, 404, 'Leaderboard not found', 404);
+  }
+
+  if (!leaderboard.enabled) {
+    return error(c, 400, 'Leaderboard is disabled');
+  }
+
+  // Upsert entry
+  const entry = await db.leaderboardEntry.upsert({
+    where: { leaderboardId_oderId: { leaderboardId: id, oderId } },
+    update: { score, metadata },
+    create: { leaderboardId: id, oderId, score, metadata },
+  });
+
+  return success(c, entry);
+});
+
+// GET /api/leaderboards/:id/rank/:oderId - 查询排名
+dataRoutes.get('/leaderboards/:id/rank/:oderId', async (c) => {
+  const { id, oderId } = c.req.param();
+
+  const leaderboard = await db.leaderboard.findUnique({ where: { id } });
+  if (!leaderboard) {
+    return error(c, 404, 'Leaderboard not found', 404);
+  }
+
+  const entry = await db.leaderboardEntry.findUnique({
+    where: { leaderboardId_oderId: { leaderboardId: id, oderId } },
+  });
+
+  if (!entry) {
+    return error(c, 404, 'Entry not found', 404);
+  }
+
+  // 计算排名：根据 metric 计算排名
+  const rank = await db.leaderboardEntry.count({
+    where: {
+      leaderboardId: id,
+      ...(leaderboard.metric === 'higher' ? { score: { gt: entry.score } } : { score: { lt: entry.score } }),
+    },
+  });
+
+  return success(c, { ...entry, rank: rank + 1 });
+});
+
+// GET /api/leaderboards/:id/top - Top N
+dataRoutes.get('/leaderboards/:id/top', async (c) => {
+  const { id } = c.req.param();
+  const n = Math.min(parseInt(c.req.query('n') || '10'), 100);
+
+  const leaderboard = await db.leaderboard.findUnique({ where: { id } });
+  if (!leaderboard) {
+    return error(c, 404, 'Leaderboard not found', 404);
+  }
+
+  const orderBy = leaderboard.metric === 'lower' ? { score: 'asc' as const } : { score: 'desc' as const };
+
+  const entries = await db.leaderboardEntry.findMany({
+    where: { leaderboardId: id },
+    orderBy,
+    take: n,
+  });
+
+  return success(c, entries);
+});
+
+// GET /api/leaderboards/:id/around/:oderId - 周围用户
+dataRoutes.get('/leaderboards/:id/around/:oderId', async (c) => {
+  const { id, oderId } = c.req.param();
+  const range = Math.min(parseInt(c.req.query('range') || '5'), 20);
+
+  const leaderboard = await db.leaderboard.findUnique({ where: { id } });
+  if (!leaderboard) {
+    return error(c, 404, 'Leaderboard not found', 404);
+  }
+
+  const entry = await db.leaderboardEntry.findUnique({
+    where: { leaderboardId_oderId: { leaderboardId: id, oderId } },
+  });
+
+  if (!entry) {
+    return error(c, 404, 'Entry not found', 404);
+  }
+
+  // 计算当前用户的排名
+  const rank = await db.leaderboardEntry.count({
+    where: {
+      leaderboardId: id,
+      ...(leaderboard.metric === 'higher' ? { score: { gt: entry.score } } : { score: { lt: entry.score } }),
+    },
+  });
+
+  const myRank = rank + 1;
+
+  // 获取上方 n/2 个
+  const topCount = Math.floor(range / 2);
+  const aboveEntries = await db.leaderboardEntry.findMany({
+    where: {
+      leaderboardId: id,
+      ...(leaderboard.metric === 'higher' ? { score: { gt: entry.score } } : { score: { lt: entry.score } }),
+    },
+    orderBy: leaderboard.metric === 'higher' ? { score: 'asc' } : { score: 'desc' },
+    take: topCount,
+  });
+
+  // 获取下方 n/2 个
+  const belowEntries = await db.leaderboardEntry.findMany({
+    where: {
+      leaderboardId: id,
+      ...(leaderboard.metric === 'higher' ? { score: { lt: entry.score } } : { score: { gt: entry.score } }),
+    },
+    orderBy: leaderboard.metric === 'higher' ? { score: 'desc' } : { score: 'asc' },
+    take: topCount,
+  });
+
+  return success(c, {
+    entry,
+    rank: myRank,
+    above: aboveEntries.reverse(),
+    below: belowEntries,
+  });
+});

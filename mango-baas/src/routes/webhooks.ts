@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import crypto from 'crypto';
 import { db } from '../db.js';
 import { createAuditLog } from '../services/audit.js';
+import { retryWebhookDelivery } from '../services/webhook.js';
 
 export const webhookRoutes = new Hono();
 
@@ -97,5 +98,35 @@ webhookRoutes.post('/:id/test', async (c) => {
     return c.json({ success: true, statusCode: res.status });
   } catch (err: any) {
     return c.json({ success: false, error: err.message });
+  }
+});
+
+// GET /webhooks/:id/deliveries - 投递记录
+webhookRoutes.get('/:id/deliveries', async (c) => {
+  const { id } = c.req.param();
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+
+  const [deliveries, total] = await Promise.all([
+    db.webhookDelivery.findMany({
+      where: { webhookId: id },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    db.webhookDelivery.count({ where: { webhookId: id } }),
+  ]);
+
+  return c.json({ success: true, data: deliveries, pagination: { page, limit, total } });
+});
+
+// POST /webhooks/deliveries/:id/retry - 重试投递
+webhookRoutes.post('/deliveries/:id/retry', async (c) => {
+  const { id } = c.req.param();
+  try {
+    await retryWebhookDelivery(id);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message }, 404);
   }
 });
